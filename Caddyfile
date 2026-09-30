@@ -1,0 +1,9 @@
+mcp.your-domain.com {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	reverse_proxy mcp:3000 {
+		flush_interval -1
+	}
+}

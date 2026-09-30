@@ -1,0 +1,35 @@
+services:
+  mcp:
+    build: .
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
+    env_file: .env
+    environment:
+      # Pinned so a local .env with PORT=3004 cannot break the port mapping / Caddy upstream
+      - PORT=3000
+      - DB_PATH=/data/growth-hub.db
+    volumes:
+      - mcp-data:/data
+    ports:
+      # Host 3004 (3000–3003 often busy on shared VPS) → container 3000
+      - "127.0.0.1:3004:3000"
+
+  # TLS + reverse proxy. Point mcp.your-domain.com A record at this VPS.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - mcp
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  mcp-data:
+  caddy-data:
+  caddy-config:
