@@ -52,7 +52,9 @@ cp .env.example .env
 #   BASE_URL=https://mcp.your-domain.com
 #   ENCRYPTION_KEY:  openssl rand -base64 32
 #   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET from GCP
-#   ALLOWED_DOMAINS: leave empty, or lock to your-domain.com + client domains
+#   ALLOWED_DOMAINS: lock to your-domain.com + client domains
+#     (or leave empty AND set ALLOW_ANY_GOOGLE_ACCOUNT=true to allow any Google account)
+#   ALLOWED_REDIRECT_HOSTS: default covers Claude, ChatGPT and vscode.dev; add other web clients' hosts
 
 docker compose up -d --build
 ```
@@ -88,6 +90,7 @@ server {
 - **Claude.ai / Claude Desktop:** Settings → Connectors → Add custom connector → URL: `https://mcp.your-domain.com/mcp` → browser opens our consent screen → Approve → Google login → done.
 - **Claude Code:** `claude mcp add --transport http growth-hub https://mcp.your-domain.com/mcp` then `/mcp` to authenticate.
 - **Cursor / VS Code:** add `https://mcp.your-domain.com/mcp` as a remote MCP server. Their `cursor://` / `vscode://` redirect URIs are allowed via `ALLOWED_REDIRECT_SCHEMES`.
+- **Other web-based clients:** add their redirect host to `ALLOWED_REDIRECT_HOSTS`, otherwise registration fails with `invalid_redirect_uri`.
 
 The consent screen shows the client's name and where you will be sent back to. Only approve connections you started yourself. Each person logs in with **their own** Google account and only sees their own data. Use `ALLOWED_DOMAINS` to restrict who can connect.
 

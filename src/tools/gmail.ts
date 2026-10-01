@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { google, type gmail_v1 } from "googleapis";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ok, mapLimit, truncate, untrusted, UNTRUSTED_NOTE, READ_ONLY, CREATES, SENDS, type ToolContext } from "./helpers.js";
+import { ok, okUntrusted, mapLimit, truncate, UNTRUSTED_NOTE, READ_ONLY, CREATES, SENDS, type ToolContext } from "./helpers.js";
 import { addressListSchema, buildRawEmail, htmlToText, subjectSchema } from "./email.js";
 
 function header(msg: gmail_v1.Schema$Message, name: string): string {
@@ -58,7 +58,7 @@ export function registerGmailTools(server: McpServer, ctx: ToolContext, caps: Gm
       {
         title: "Gmail: Search messages",
         description:
-          "Search Gmail with standard operators (from:, to:, subject:, newer_than:7d, has:attachment, is:unread). Returns id, from, subject, date, snippet and a nextPageToken for more results.",
+          `Search Gmail with standard operators (from:, to:, subject:, newer_than:7d, has:attachment, is:unread). Returns id, from, subject, date, snippet and a nextPageToken for more results. ${UNTRUSTED_NOTE}`,
         inputSchema: {
           query: z.string().max(2000).describe("Gmail search query, e.g. 'from:alice newer_than:7d'"),
           maxResults: z.number().int().min(1).max(50).default(10).describe("Messages per page (1-50)"),
@@ -69,13 +69,19 @@ export function registerGmailTools(server: McpServer, ctx: ToolContext, caps: Gm
       async ({ query, maxResults, pageToken }) => {
         try {
           const { data } = await gmail.users.messages.list({ userId: "me", q: query, maxResults, pageToken });
-          const messages = await mapLimit(data.messages ?? [], 5, async (m) => {
-            const { data: msg } = await gmail.users.messages.get({
-              userId: "me",
-              id: m.id!,
-              format: "metadata",
-              metadataHeaders: ["From", "To", "Subject", "Date"],
-            });
+          const found = await mapLimit(data.messages ?? [], 5, async (m) => {
+            let msg: gmail_v1.Schema$Message;
+            try {
+              ({ data: msg } = await gmail.users.messages.get({
+                userId: "me",
+                id: m.id!,
+                format: "metadata",
+                metadataHeaders: ["From", "To", "Subject", "Date"],
+              }));
+            } catch (e) {
+              if ((e as { response?: { status?: number } }).response?.status === 404) return null;
+              throw e;
+            }
             return {
               id: msg.id,
               threadId: msg.threadId,
@@ -86,7 +92,12 @@ export function registerGmailTools(server: McpServer, ctx: ToolContext, caps: Gm
               snippet: msg.snippet,
             };
           });
-          return ok({ messages, nextPageToken: data.nextPageToken ?? null, resultSizeEstimate: data.resultSizeEstimate ?? 0 });
+          const messages = found.filter((m) => m !== null);
+          return okUntrusted("gmail", {
+            messages,
+            nextPageToken: data.nextPageToken ?? null,
+            resultSizeEstimate: data.resultSizeEstimate ?? 0,
+          });
         } catch (e) {
           return ctx.fail(e);
         }
@@ -108,7 +119,7 @@ export function registerGmailTools(server: McpServer, ctx: ToolContext, caps: Gm
         try {
           const { data: msg } = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
           const { text, truncated } = truncate(extractBody(msg.payload) || msg.snippet || "", maxChars);
-          return ok({
+          return okUntrusted("gmail", {
             id: msg.id,
             threadId: msg.threadId,
             from: header(msg, "From"),
@@ -118,7 +129,7 @@ export function registerGmailTools(server: McpServer, ctx: ToolContext, caps: Gm
             date: header(msg, "Date"),
             labelIds: msg.labelIds ?? [],
             attachments: attachments(msg.payload),
-            body: untrusted("gmail", text),
+            body: text,
             truncated,
           });
         } catch (e) {

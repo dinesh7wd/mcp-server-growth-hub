@@ -124,6 +124,7 @@ export function registerGa4Tools(server: McpServer, ctx: ToolContext): void {
             dimensions: dimensions.map((name) => ({ name })),
             limit: String(limit),
             offset: String(offset),
+            metricAggregations: ["TOTAL"],
             ...(orderByMetric ? { orderBys: [{ metric: { metricName: orderByMetric }, desc: true }] } : {}),
             ...(dimensionFilter ? { dimensionFilter } : {}),
             ...(metricFilter ? { metricFilter } : {}),

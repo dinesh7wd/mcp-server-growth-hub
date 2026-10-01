@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { google } from "googleapis";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ok, truncate, untrusted, UNTRUSTED_NOTE, READ_ONLY, CREATES, type ToolContext } from "./helpers.js";
+import { ok, okUntrusted, truncate, untrusted, UNTRUSTED_NOTE, READ_ONLY, CREATES, type ToolContext } from "./helpers.js";
 
 const EXPORT_MIME: Record<string, string> = {
   "application/vnd.google-apps.document": "text/plain",
@@ -39,7 +39,7 @@ export function registerDriveTools(server: McpServer, ctx: ToolContext, caps: Dr
       {
         title: "Drive: Search files",
         description:
-          "Search Google Drive, including shared drives. By default 'query' is plain text matched against file names and content. Set raw=true to pass Drive query syntax verbatim (e.g. name contains 'report' and mimeType = 'application/pdf').",
+          `Search Google Drive, including shared drives. By default 'query' is plain text matched against file names and content. Set raw=true to pass Drive query syntax verbatim (e.g. name contains 'report' and mimeType = 'application/pdf'). ${UNTRUSTED_NOTE}`,
         inputSchema: {
           query: z.string().min(1).max(2000).describe("Plain text to search for, or a Drive query when raw=true"),
           raw: z.boolean().default(false).describe("Treat 'query' as Drive query syntax instead of plain text"),
@@ -60,7 +60,11 @@ export function registerDriveTools(server: McpServer, ctx: ToolContext, caps: Dr
             fields: "nextPageToken, incompleteSearch, files(id, name, mimeType, modifiedTime, size, webViewLink, driveId, owners(emailAddress))",
             orderBy: "modifiedTime desc",
           });
-          return ok({ files: data.files ?? [], nextPageToken: data.nextPageToken ?? null, incompleteSearch: data.incompleteSearch ?? false });
+          return okUntrusted("drive", {
+            files: data.files ?? [],
+            nextPageToken: data.nextPageToken ?? null,
+            incompleteSearch: data.incompleteSearch ?? false,
+          });
         } catch (e) {
           return ctx.fail(e);
         }
@@ -95,9 +99,9 @@ export function registerDriveTools(server: McpServer, ctx: ToolContext, caps: Dr
             const { data } = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "text" });
             content = data as string;
           }
-          if (content === null) return ok({ note: "Binary or large file — metadata only", ...meta });
+          if (content === null) return okUntrusted("drive", { note: "Binary or large file — metadata only", ...meta });
           const { text, truncated } = truncate(content, maxChars);
-          return ok(`# ${meta.name}\n\n${untrusted("drive", text)}${truncated ? `\n\n[truncated at ${maxChars} characters]` : ""}`);
+          return ok(`${untrusted("drive", `# ${meta.name}\n\n${text}`)}${truncated ? `\n\n[truncated at ${maxChars} characters]` : ""}`);
         } catch (e) {
           return ctx.fail(e);
         }

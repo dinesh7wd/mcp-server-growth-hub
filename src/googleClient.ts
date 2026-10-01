@@ -2,6 +2,7 @@ import { google, type Auth } from "googleapis";
 import { config } from "./config.js";
 import * as db from "./db.js";
 import { parseScopes } from "./scopes.js";
+import { describeError } from "./logSafe.js";
 
 export type OAuth2Client = Auth.OAuth2Client;
 
@@ -51,7 +52,7 @@ export async function authFor(userId: string): Promise<{ auth: OAuth2Client; gra
         scope: t.scope ?? stored.scope,
       });
     } catch (e) {
-      console.error("Failed to persist refreshed Google tokens:", e);
+      console.error("Failed to persist refreshed Google tokens:", describeError(e));
     }
   });
 

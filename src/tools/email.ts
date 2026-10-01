@@ -132,6 +132,7 @@ export function htmlToText(html: string): string {
   const text = html
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(script|style|head|noscript|template)\b[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<(script|style|noscript|template)\b[\s\S]*$/i, "")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|blockquote)\s*>/gi, "\n")
     .replace(/<[^>]+>/g, " ");

@@ -144,7 +144,12 @@ export function registerGscTools(server: McpServer, ctx: ToolContext, opts: { su
       description: "Run URL Inspection: index status, mobile usability and rich results for a specific URL.",
       inputSchema: {
         siteUrl,
-        inspectionUrl: z.string().url().max(2048).describe("Full URL to inspect; must belong to the property"),
+        inspectionUrl: z
+          .string()
+          .url()
+          .max(2048)
+          .refine((u) => /^https?:\/\//i.test(u), "must be an http(s) URL")
+          .describe("Full http(s) URL to inspect; must belong to the property"),
         languageCode: z.string().max(20).optional().describe("Optional IETF language tag for messages, e.g. 'en-US'"),
       },
       annotations: READ_ONLY,

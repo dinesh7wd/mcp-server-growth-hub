@@ -17,6 +17,7 @@ import * as db from "./db.js";
 import { checkRedirectUri, cspSourceFor, describeRedirect, MAX_REDIRECT_URIS } from "./redirectUris.js";
 import { rateLimit } from "./rateLimit.js";
 import { renderConsent, renderError } from "./consentPage.js";
+import { describeError } from "./logSafe.js";
 
 export const ACCESS_TTL_MS = 60 * 60 * 1000;
 const CONSENT_TTL_MS = 10 * 60 * 1000;
@@ -79,7 +80,18 @@ export const googleApi = {
       },
     };
   },
+  async revoke(token: string): Promise<void> {
+    await googleOAuthClient().revokeToken(token);
+  },
 };
+
+/** Drops the user's stored Google credentials once no client is connected, and revokes them at Google. */
+export function forgetUserIfUnused(userId: string): void {
+  const { googleRefreshToken } = db.forgetUserIfUnused(userId);
+  if (googleRefreshToken) {
+    googleApi.revoke(googleRefreshToken).catch((e) => console.warn("Google token revocation failed:", describeError(e)));
+  }
+}
 
 // ── Helpers ───────────────────────────────────────────────
 export function domainAllowed(email: string, hd: string | undefined, allowed: string[] = config.allowedDomains): boolean {
@@ -196,7 +208,7 @@ oauthRouter.post("/register", limits.register, ...formBody, (req, res) => {
     return;
   }
   for (const uri of redirectUris) {
-    const check = checkRedirectUri(uri, config.allowedRedirectSchemes);
+    const check = checkRedirectUri(uri, config.allowedRedirectSchemes, config.allowedRedirectHosts);
     if (!check.ok) {
       res.status(400).json({
         error: "invalid_redirect_uri",
@@ -234,6 +246,9 @@ oauthRouter.get("/authorize", limits.authorize, (req, res) => {
   if (!redirectUri && client.redirect_uris.length === 1) redirectUri = client.redirect_uris[0];
   if (!redirectUri || !client.redirect_uris.includes(redirectUri)) {
     return renderError(res, 400, "redirect_uri is not registered for this client.");
+  }
+  if (!checkRedirectUri(redirectUri, config.allowedRedirectSchemes, config.allowedRedirectHosts).ok) {
+    return renderError(res, 400, "This client's redirect address is not allowed on this server.");
   }
   const state = str(q.state);
   const fail = (error: string, description: string) =>
@@ -353,7 +368,7 @@ oauthRouter.get("/oauth/google/callback", limits.authorize, async (req, res) => 
     });
     back({ code: ourCode });
   } catch (e) {
-    console.error("Google callback error:", e);
+    console.error("Google callback error:", describeError(e));
     back({ error: "server_error", error_description: "Failed to complete Google login" });
   }
 });
@@ -406,6 +421,7 @@ oauthRouter.post("/token", limits.token, ...formBody, (req, res) => {
       const reused = db.findUsedRefreshToken(presented);
       if (reused) {
         db.deleteTokensFor(reused.client_id, reused.user_id);
+        forgetUserIfUnused(reused.user_id);
         console.warn("Refresh token reuse detected; revoked the grant", { client_id: reused.client_id });
         return err(400, "invalid_grant", "Refresh token was already used; this connection has been revoked, please reconnect");
       }
@@ -415,6 +431,7 @@ oauthRouter.post("/token", limits.token, ...formBody, (req, res) => {
     const identity = db.getUserIdentity(row.user_id);
     if (!identity || !domainAllowed(identity.email, identity.hd)) {
       db.deleteUserTokens(row.user_id);
+      forgetUserIfUnused(row.user_id);
       return err(400, "invalid_grant", "Account is no longer allowed on this server");
     }
     if (!db.consumeRefreshToken(presented, row)) return err(400, "invalid_grant", "Refresh token already used");
@@ -433,8 +450,10 @@ oauthRouter.post("/revoke", limits.revoke, ...formBody, (req, res) => {
   if (!token) return void res.status(400).json({ error: "invalid_request", error_description: "token is required" });
   const row = db.getToken(token);
   if (row && row.client_id === clientId) {
-    if (row.type === "refresh") db.deleteTokensFor(row.client_id, row.user_id);
-    else db.consumeToken(token);
+    if (row.type === "refresh") {
+      db.deleteTokensFor(row.client_id, row.user_id);
+      forgetUserIfUnused(row.user_id);
+    } else db.consumeToken(token);
   }
   res.status(200).end();
 });

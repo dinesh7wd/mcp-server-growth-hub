@@ -81,6 +81,35 @@ describe("dynamic client registration", () => {
     const many = Array.from({ length: 11 }, (_, i) => `https://c.example/${i}`);
     expect((await request(app).post("/register").send({ redirect_uris: many })).status).toBe(400);
   });
+
+  it("only accepts https redirect hosts from ALLOWED_REDIRECT_HOSTS", async () => {
+    const attacker = await request(app).post("/register").send({ redirect_uris: ["https://attacker.example/cb"] });
+    expect(attacker.status).toBe(400);
+    expect(attacker.body.error_description).toMatch(/ALLOWED_REDIRECT_HOSTS/);
+    expect((await request(app).post("/register").send({ redirect_uris: ["https://claude.ai/api/mcp/auth_callback"] })).status).toBe(201);
+  });
+
+  it("refuses to authorize a stored client whose redirect host is no longer allowed", async () => {
+    db.saveClient({ client_id: "legacy-client", redirect_uris: ["https://old.example/cb"], client_name: "Old" });
+    const { challenge } = pkce();
+    const res = await request(app)
+      .get("/authorize")
+      .query({ client_id: "legacy-client", redirect_uri: "https://old.example/cb", response_type: "code", code_challenge: challenge, code_challenge_method: "S256" });
+    expect(res.status).toBe(400);
+    expect(res.headers.location).toBeUndefined();
+  });
+
+  it("answers CORS on OAuth endpoints only for allowed origins", async () => {
+    const allowed = await request(app).options("/token").set("Origin", "https://claude.ai");
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://claude.ai");
+    const other = await request(app).options("/token").set("Origin", "https://evil.example");
+    expect(other.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("rejects unexpected Host headers on OAuth endpoints too", async () => {
+    const res = await request(app).post("/register").set("Host", "attacker.example").send({ redirect_uris: [REDIRECT] });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("consent screen", () => {
@@ -309,6 +338,24 @@ describe("revocation (RFC 7009)", () => {
     expect(res.status).toBe(200);
     expect(db.getToken(refresh_token)).toBeNull();
     expect(db.getToken(access_token)).toBeNull();
+  });
+
+  it("deletes the stored Google credentials and revokes them at Google once the last grant is revoked", async () => {
+    const revoke = vi.spyOn(googleApi, "revoke").mockResolvedValue();
+    const first = await fullLogin({ id: "g-user-revoke", email: "revoke@example.com" });
+    const second = await fullLogin({ id: "g-user-revoke", email: "revoke@example.com" });
+    await request(app).post("/revoke").type("form").send({ token: first.refresh_token, client_id: first.clientId });
+    expect(db.getUserIdentity("g-user-revoke")).not.toBeNull();
+    expect(revoke).not.toHaveBeenCalled();
+    await request(app).post("/revoke").type("form").send({ token: second.refresh_token, client_id: second.clientId });
+    expect(db.getUserIdentity("g-user-revoke")).toBeNull();
+    expect(revoke).toHaveBeenCalledWith("1//google-refresh");
+  });
+
+  it("cleanup deletes users that no client holds a token for", async () => {
+    db.upsertUser("g-orphan", "orphan@example.com", undefined, { access_token: "a", refresh_token: "r" });
+    db.cleanup();
+    expect(db.getUserIdentity("g-orphan")).toBeNull();
   });
 
   it("ignores tokens belonging to another client and requires client_id", async () => {

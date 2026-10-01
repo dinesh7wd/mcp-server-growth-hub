@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config.js";
 import { encrypt, decrypt, sha256base64url } from "./crypto.js";
+import { describeError } from "./logSafe.js";
 
 export type DB = Database.Database;
 
@@ -89,7 +90,7 @@ export function migrate(database: DB, refreshTtlMs: number = config.refreshToken
       }
       const updateCode = database.prepare("UPDATE auth_codes SET code = ? WHERE code = ?");
       for (const { code } of database.prepare("SELECT code FROM auth_codes").all() as { code: string }[]) {
-        if (/^ac_/.test(code)) updateCode.run(hashToken(code), code);
+        if (/^ac_/.test(code) && code.length > 43) updateCode.run(hashToken(code), code);
       }
 
       const t = now();
@@ -380,6 +381,25 @@ export function deleteUserTokens(userId: string): void {
   db.prepare("DELETE FROM tokens WHERE user_id = ?").run(userId);
 }
 
+const UNUSED_USER_CONDITION = `NOT EXISTS (SELECT 1 FROM tokens WHERE tokens.user_id = users.id)
+  AND NOT EXISTS (SELECT 1 FROM auth_codes WHERE auth_codes.user_id = users.id)`;
+
+/**
+ * Deletes the user's stored Google credentials once no client holds a token or pending code for them.
+ * @returns the Google refresh token that was stored (so the caller can revoke it at Google), or null
+ */
+export function forgetUserIfUnused(userId: string): { deleted: boolean; googleRefreshToken: string | null } {
+  return db.transaction(() => {
+    const row = db.prepare(`SELECT google_tokens FROM users WHERE id = ? AND ${UNUSED_USER_CONDITION}`).get(userId) as
+      | { google_tokens: string }
+      | undefined;
+    if (!row) return { deleted: false, googleRefreshToken: null };
+    db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+    const read = readTokens(userId, row.google_tokens);
+    return { deleted: true, googleRefreshToken: read?.tokens.refresh_token ?? null };
+  })();
+}
+
 // ── Maintenance ───────────────────────────────────────────
 export function cleanup(): void {
   const t = now();
@@ -394,13 +414,14 @@ export function cleanup(): void {
        AND NOT EXISTS (SELECT 1 FROM auth_codes WHERE auth_codes.client_id = clients.client_id)
        AND ((last_used_at IS NULL AND created_at < ?) OR (last_used_at IS NOT NULL AND last_used_at < ?))`
   ).run(t - UNUSED_CLIENT_TTL_MS, t - IDLE_CLIENT_TTL_MS);
+  db.prepare(`DELETE FROM users WHERE ${UNUSED_USER_CONDITION}`).run();
 }
 
 setInterval(() => {
   try {
     cleanup();
   } catch (e) {
-    console.error("DB cleanup failed:", e);
+    console.error("DB cleanup failed:", describeError(e));
   }
 }, 15 * 60 * 1000).unref();
 

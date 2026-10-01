@@ -49,10 +49,28 @@ export const SENDS: ToolAnnotations = {
   openWorldHint: true,
 };
 
+/** Upper bound on one tool result, so a large report cannot flood the model context or memory. */
+export const MAX_TOOL_OUTPUT_CHARS = 1_000_000;
+
 export function ok(data: unknown): ToolResult {
-  return {
-    content: [{ type: "text", text: typeof data === "string" ? data : JSON.stringify(data, null, 2) }],
-  };
+  const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  if (text.length > MAX_TOOL_OUTPUT_CHARS) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Error: the result is ${text.length} characters, above the ${MAX_TOOL_OUTPUT_CHARS} limit. Request fewer rows (e.g. a smaller rowLimit or maxResults) and page through the results.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+  return { content: [{ type: "text", text }] };
+}
+
+/** Like ok(), but the whole result is third-party content (names, headers, snippets, bodies). */
+export function okUntrusted(source: string, data: unknown): ToolResult {
+  return ok(untrusted(source, typeof data === "string" ? data : JSON.stringify(data, null, 2)));
 }
 
 export function errorMessage(e: unknown): string {

@@ -72,13 +72,16 @@ MCP client --Bearer--> /mcp --> per-user Google OAuth2 client --> Google APIs
                      -> consent screen -> Google login -> /oauth/google/callback -> /token
 ```
 
-- Transport: **Streamable HTTP** (stateless), endpoint `/mcp`; Host and Origin validated
+- Transport: **Streamable HTTP** (stateless), endpoint `/mcp`; the Host header is validated on every route except `/health`, and browser Origins on `/mcp` and the OAuth endpoints
 - Auth: OAuth 2.1 + PKCE S256, per-client consent screen bound to the browser (CSRF token + cookie)
+- Client registration (DCR) only accepts https redirect URIs whose host is in `ALLOWED_REDIRECT_HOSTS` (plus loopback and allow-listed app schemes), so nobody can register a client that sends your users' codes to their own site
 - Tokens: our access (1 h) and refresh tokens (rotated, `REFRESH_TOKEN_TTL_DAYS`) are stored as SHA-256 hashes; replaying an already-rotated refresh token revokes that client's whole grant (reuse detection); revocation at `/revoke` (RFC 7009)
-- Email and Drive content returned to the model is wrapped in `UNTRUSTED_CONTENT` markers (prompt-injection hygiene); Google API calls time out after 60 s, Ads calls after 30 s
-- If `ALLOWED_DOMAINS` is empty, any Google account can connect (a warning is logged at startup)
+- When a user's last grant is revoked (or expires), their encrypted Google tokens are deleted and the Google refresh token is revoked at Google
+- Gmail and Drive tool results (subjects, senders, file names, snippets and bodies) are wrapped in `UNTRUSTED_CONTENT` markers (prompt-injection hygiene); Google API calls time out after 60 s, Ads calls after 30 s; a tool result is capped at 1,000,000 characters
+- With an https `BASE_URL`, an empty `ALLOWED_DOMAINS` is refused at startup unless `ALLOW_ANY_GOOGLE_ACCOUNT=true`
+- Logs never include raw error objects (Google client errors carry the OAuth client secret in their request config)
 - Discovery: `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource[/mcp]` (RFC 9728)
-- Rate limiting on OAuth endpoints; 64 KB body limit (4 MB on `/mcp`)
+- Rate limiting on OAuth endpoints and per user on `/mcp` (120 requests/minute, 8 in flight); 64 KB body limit (4 MB on `/mcp`)
 - Health: `GET /health` -> `{"ok":true}`
 - Data: SQLite (`DB_PATH`), schema migrated automatically on start (`PRAGMA user_version`)
 
@@ -101,7 +104,7 @@ cp .env.example .env
 
 ### Env vars
 
-The server validates configuration at startup and exits with a clear message if something is wrong.
+The server validates configuration at startup and exits with a clear message if something is wrong. Boolean flags accept `true`/`false`, `1`/`0`, `yes`/`no` and `on`/`off`; anything else is an error.
 
 | Variable | Required | Default | Notes |
 |----------|----------|---------|-------|
@@ -111,10 +114,12 @@ The server validates configuration at startup and exits with a clear message if 
 | `ENCRYPTION_KEY_PREVIOUS` | No | | Old key during rotation (see SETUP.md) |
 | `DB_PATH` | No | `./data/growth-hub.db` | Compose sets `/data/growth-hub.db` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Yes | | GCP OAuth Web client |
-| `ALLOWED_DOMAINS` | No | any | Comma-separated; checked at login and on every refresh |
+| `ALLOWED_DOMAINS` | Yes on https* | | Comma-separated; checked at login and on every refresh |
+| `ALLOW_ANY_GOOGLE_ACCOUNT` | No | `false` | *Set `true` to run with an empty `ALLOWED_DOMAINS` (any Google account can connect) |
 | `ALLOWED_REDIRECT_SCHEMES` | No | `cursor,vscode,vscode-insiders,claude` | Custom URI schemes accepted at `/register` |
-| `ALLOWED_ORIGINS` | No | `https://claude.ai,https://claude.com,http://localhost:*,http://127.0.0.1:*` | Browser Origins allowed on `/mcp` |
-| `ALLOWED_HOSTS` | No | host of `BASE_URL` | Extra Host headers accepted on `/mcp` |
+| `ALLOWED_REDIRECT_HOSTS` | No | `claude.ai,claude.com,chatgpt.com,vscode.dev,insiders.vscode.dev` | Hosts allowed in https redirect URIs; `*.example.com` includes subdomains, `*` allows any |
+| `ALLOWED_ORIGINS` | No | `https://claude.ai,https://claude.com,http://localhost:*,http://127.0.0.1:*` | Browser Origins allowed on `/mcp` and the OAuth endpoints |
+| `ALLOWED_HOSTS` | No | host of `BASE_URL` | Extra Host headers accepted (all routes except `/health`) |
 | `REFRESH_TOKEN_TTL_DAYS` | No | `60` | Refresh token lifetime (sliding, rotated) |
 | `DRIVE_ENABLED` / `GMAIL_ENABLED` | No | `true` | Turn tool families (and their scopes) off |
 | `GMAIL_SEND_ENABLED` | No | `false` | Registers `gmail_send` and requests `gmail.send` |
@@ -221,6 +226,7 @@ Examples:
   `claude mcp add --transport http growth-hub https://your-domain/mcp`
   then `/mcp` to authenticate
 - **Cursor / VS Code:** add the URL as a remote (HTTP) MCP server; their custom redirect schemes are allowed by `ALLOWED_REDIRECT_SCHEMES`
+- **Other web-based clients:** add their redirect host to `ALLOWED_REDIRECT_HOSTS`
 
 Each person logs in with **their** Google account and only sees their data. Use `ALLOWED_DOMAINS` to restrict who can connect.
 

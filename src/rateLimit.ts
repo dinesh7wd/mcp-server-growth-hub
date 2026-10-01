@@ -5,10 +5,14 @@ export interface RateLimitOptions {
   max: number;
   name: string;
   now?: () => number;
+  /** Bucket key; defaults to the client IP. */
+  key?: (req: Request) => string;
 }
 
-/** Fixed-window, in-memory, per-IP limiter. Adequate for a single-instance deployment. */
-export function rateLimit({ windowMs, max, name, now = Date.now }: RateLimitOptions): RequestHandler {
+const ipKey = (req: Request): string => req.ip ?? req.socket.remoteAddress ?? "unknown";
+
+/** Fixed-window, in-memory limiter (per IP by default). Adequate for a single-instance deployment. */
+export function rateLimit({ windowMs, max, name, now = Date.now, key: keyOf = ipKey }: RateLimitOptions): RequestHandler {
   const hits = new Map<string, { count: number; resetAt: number }>();
 
   const sweep = setInterval(() => {
@@ -18,7 +22,7 @@ export function rateLimit({ windowMs, max, name, now = Date.now }: RateLimitOpti
   sweep.unref();
 
   return (req: Request, res: Response, next: NextFunction) => {
-    const key = req.ip ?? req.socket.remoteAddress ?? "unknown";
+    const key = keyOf(req);
     const t = now();
     let entry = hits.get(key);
     if (!entry || entry.resetAt <= t) {
@@ -32,6 +36,32 @@ export function rateLimit({ windowMs, max, name, now = Date.now }: RateLimitOpti
       res.status(429).json({ error: "rate_limited", error_description: "Too many requests, try again later" });
       return;
     }
+    next();
+  };
+}
+
+/** Caps simultaneous in-flight requests per key; extra requests get 429 instead of queuing. */
+export function concurrencyLimit(max: number, keyOf: (req: Request) => string): RequestHandler {
+  const active = new Map<string, number>();
+  return (req: Request, res: Response, next: NextFunction) => {
+    const key = keyOf(req);
+    const n = active.get(key) ?? 0;
+    if (n >= max) {
+      res.setHeader("Retry-After", "1");
+      res.status(429).json({ error: "rate_limited", error_description: "Too many concurrent requests" });
+      return;
+    }
+    active.set(key, n + 1);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      const left = (active.get(key) ?? 1) - 1;
+      if (left <= 0) active.delete(key);
+      else active.set(key, left);
+    };
+    res.on("finish", release);
+    res.on("close", release);
     next();
   };
 }

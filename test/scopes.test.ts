@@ -56,7 +56,31 @@ describe("config validation", () => {
     ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
     GOOGLE_CLIENT_ID: "id",
     GOOGLE_CLIENT_SECRET: "secret",
+    ALLOWED_DOMAINS: "example.com",
   };
+
+  it("requires ALLOWED_DOMAINS or an explicit opt-in to any Google account on https", () => {
+    const { ALLOWED_DOMAINS: _omit, ...open } = base;
+    expect(() => loadConfig(open)).toThrow(/ALLOWED_DOMAINS/);
+    expect(loadConfig({ ...open, ALLOW_ANY_GOOGLE_ACCOUNT: "yes" }).allowedDomains).toEqual([]);
+    expect(loadConfig({ ...open, BASE_URL: "http://localhost:3004" }).allowedDomains).toEqual([]);
+  });
+
+  it("parses booleans strictly and accepts 1/0, yes/no, on/off", () => {
+    expect(loadConfig({ ...base, INDEXING_ENABLED: "1", GMAIL_ENABLED: "off" })).toMatchObject({
+      indexingEnabled: true,
+      gmailEnabled: false,
+    });
+    expect(() => loadConfig({ ...base, INDEXING_ENABLED: "ture" })).toThrow(/INDEXING_ENABLED/);
+  });
+
+  it("defaults the redirect host allow-list to the hosted MCP clients", () => {
+    expect(loadConfig(base).allowedRedirectHosts).toEqual(["claude.ai", "claude.com", "chatgpt.com", "vscode.dev", "insiders.vscode.dev"]);
+    expect(loadConfig({ ...base, ALLOWED_REDIRECT_HOSTS: "*.Example.com, app.test" }).allowedRedirectHosts).toEqual([
+      "*.example.com",
+      "app.test",
+    ]);
+  });
 
   it("accepts a valid environment", () => {
     expect(loadConfig(base).baseUrl).toBe("https://mcp.example.com");

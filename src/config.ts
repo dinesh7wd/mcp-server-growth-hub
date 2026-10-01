@@ -10,9 +10,15 @@ function required(env: Env, name: string): string {
   return v;
 }
 
-function bool(v: string | undefined, fallback: boolean): boolean {
+const TRUE_VALUES = new Set(["true", "1", "yes", "on"]);
+const FALSE_VALUES = new Set(["false", "0", "no", "off"]);
+
+function bool(env: Env, name: string, fallback: boolean): boolean {
+  const v = env[name]?.trim().toLowerCase();
   if (v === undefined || v === "") return fallback;
-  return v.trim().toLowerCase() === "true";
+  if (TRUE_VALUES.has(v)) return true;
+  if (FALSE_VALUES.has(v)) return false;
+  throw new Error(`${name} must be true/false (also accepted: 1/0, yes/no, on/off)`);
 }
 
 function list(v: string | undefined): string[] {
@@ -39,6 +45,9 @@ function encryptionKey(env: Env, name: string, isRequired: boolean): Buffer | nu
 }
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** HTTPS redirect hosts of the hosted MCP clients (Claude, ChatGPT, VS Code for the Web). */
+export const DEFAULT_REDIRECT_HOSTS = "claude.ai,claude.com,chatgpt.com,vscode.dev,insiders.vscode.dev";
 
 /** Sunsets August 2027 (https://developers.google.com/google-ads/api/docs/sunset-dates). */
 export const DEFAULT_ADS_API_VERSION = "v25";
@@ -69,6 +78,15 @@ export function loadConfig(env: Env = process.env) {
   const adsApiVersion = env.ADS_API_VERSION || DEFAULT_ADS_API_VERSION;
   if (!/^v\d+$/.test(adsApiVersion)) throw new Error("ADS_API_VERSION must look like v25");
 
+  const allowedDomains = list(env.ALLOWED_DOMAINS).map((d) => d.toLowerCase());
+  const allowAnyGoogleAccount = bool(env, "ALLOW_ANY_GOOGLE_ACCOUNT", false);
+  if (allowedDomains.length === 0 && !allowAnyGoogleAccount && base.protocol === "https:") {
+    throw new Error(
+      "ALLOWED_DOMAINS is empty: set it to the Google Workspace domains allowed to connect, " +
+        "or set ALLOW_ANY_GOOGLE_ACCOUNT=true to let any Google account connect"
+    );
+  }
+
   return {
     baseUrl,
     resourceUrl: `${baseUrl}/mcp`,
@@ -81,26 +99,27 @@ export function loadConfig(env: Env = process.env) {
       clientId: required(env, "GOOGLE_CLIENT_ID"),
       clientSecret: required(env, "GOOGLE_CLIENT_SECRET"),
     },
-    allowedDomains: list(env.ALLOWED_DOMAINS).map((d) => d.toLowerCase()),
+    allowedDomains,
     allowedRedirectSchemes: list(env.ALLOWED_REDIRECT_SCHEMES ?? "cursor,vscode,vscode-insiders,claude").map((s) =>
       s.toLowerCase().replace(/:$/, "")
     ),
+    allowedRedirectHosts: list(env.ALLOWED_REDIRECT_HOSTS ?? DEFAULT_REDIRECT_HOSTS).map((h) => h.toLowerCase()),
     allowedOrigins: list(
       env.ALLOWED_ORIGINS ?? "https://claude.ai,https://claude.com,http://localhost:*,http://127.0.0.1:*"
     ),
     allowedHosts: [base.hostname, ...list(env.ALLOWED_HOSTS).map((h) => h.toLowerCase())],
     refreshTokenTtlMs: positiveInt(env, "REFRESH_TOKEN_TTL_DAYS", 60) * 24 * 60 * 60 * 1000,
-    gmailEnabled: bool(env.GMAIL_ENABLED, true),
-    gmailSendEnabled: bool(env.GMAIL_SEND_ENABLED, false),
-    driveEnabled: bool(env.DRIVE_ENABLED, true),
-    gscSubmitEnabled: bool(env.GSC_SUBMIT_ENABLED, false),
-    indexingEnabled: bool(env.INDEXING_ENABLED, false),
+    gmailEnabled: bool(env, "GMAIL_ENABLED", true),
+    gmailSendEnabled: bool(env, "GMAIL_SEND_ENABLED", false),
+    driveEnabled: bool(env, "DRIVE_ENABLED", true),
+    gscSubmitEnabled: bool(env, "GSC_SUBMIT_ENABLED", false),
+    indexingEnabled: bool(env, "INDEXING_ENABLED", false),
     ads: {
       developerToken: env.ADS_DEVELOPER_TOKEN ?? "",
       loginCustomerId,
       apiVersion: adsApiVersion,
     },
-    gbpEnabled: bool(env.GBP_ENABLED, false),
+    gbpEnabled: bool(env, "GBP_ENABLED", false),
   };
 }
 
