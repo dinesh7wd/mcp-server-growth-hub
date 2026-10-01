@@ -74,7 +74,9 @@ MCP client --Bearer--> /mcp --> per-user Google OAuth2 client --> Google APIs
 
 - Transport: **Streamable HTTP** (stateless), endpoint `/mcp`; Host and Origin validated
 - Auth: OAuth 2.1 + PKCE S256, per-client consent screen bound to the browser (CSRF token + cookie)
-- Tokens: our access (1 h) and refresh tokens (rotated, `REFRESH_TOKEN_TTL_DAYS`) are stored as SHA-256 hashes; revocation at `/revoke` (RFC 7009)
+- Tokens: our access (1 h) and refresh tokens (rotated, `REFRESH_TOKEN_TTL_DAYS`) are stored as SHA-256 hashes; replaying an already-rotated refresh token revokes that client's whole grant (reuse detection); revocation at `/revoke` (RFC 7009)
+- Email and Drive content returned to the model is wrapped in `UNTRUSTED_CONTENT` markers (prompt-injection hygiene); Google API calls time out after 60 s, Ads calls after 30 s
+- If `ALLOWED_DOMAINS` is empty, any Google account can connect (a warning is logged at startup)
 - Discovery: `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource[/mcp]` (RFC 9728)
 - Rate limiting on OAuth endpoints; 64 KB body limit (4 MB on `/mcp`)
 - Health: `GET /health` -> `{"ok":true}`
@@ -120,7 +122,7 @@ The server validates configuration at startup and exits with a clear message if 
 | `INDEXING_ENABLED` | No | `false` | Registers `indexing_*` tools and requests `indexing` |
 | `ADS_DEVELOPER_TOKEN` | Phase 2 | | Enables Ads tools |
 | `ADS_LOGIN_CUSTOMER_ID` | Phase 2 | | Optional MCC, 10 digits |
-| `ADS_API_VERSION` | Phase 2 | `v22` | Bump when Google sunsets a version |
+| `ADS_API_VERSION` | Phase 2 | `v25` | v25 sunsets Aug 2027; bump when Google sunsets a version ([dates](https://developers.google.com/google-ads/api/docs/sunset-dates)) |
 | `GBP_ENABLED` | Phase 2 | `false` | `true` to enable Business Profile tools |
 
 GCP redirect URI (must match `BASE_URL`):

@@ -40,6 +40,9 @@ function encryptionKey(env: Env, name: string, isRequired: boolean): Buffer | nu
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+/** Sunsets August 2027 (https://developers.google.com/google-ads/api/docs/sunset-dates). */
+export const DEFAULT_ADS_API_VERSION = "v25";
+
 export function loadConfig(env: Env = process.env) {
   const baseUrlRaw = required(env, "BASE_URL").replace(/\/+$/, "");
   let base: URL;
@@ -63,8 +66,8 @@ export function loadConfig(env: Env = process.env) {
   if (loginCustomerId && !/^\d{10}$/.test(loginCustomerId)) {
     throw new Error("ADS_LOGIN_CUSTOMER_ID must be a 10-digit customer ID");
   }
-  const adsApiVersion = env.ADS_API_VERSION || "v22";
-  if (!/^v\d+$/.test(adsApiVersion)) throw new Error("ADS_API_VERSION must look like v22");
+  const adsApiVersion = env.ADS_API_VERSION || DEFAULT_ADS_API_VERSION;
+  if (!/^v\d+$/.test(adsApiVersion)) throw new Error("ADS_API_VERSION must look like v25");
 
   return {
     baseUrl,

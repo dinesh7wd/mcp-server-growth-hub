@@ -10,6 +10,7 @@ import type { OAuth2Client } from "../googleClient.js";
 import { ok, READ_ONLY, type ToolContext } from "./helpers.js";
 
 const BASE = `https://googleads.googleapis.com/${config.ads.apiVersion}`;
+export const ADS_TIMEOUT_MS = 30_000;
 
 export function normalizeCustomerId(id: string): string {
   const digits = id.replace(/-/g, "").trim();
@@ -32,21 +33,33 @@ export function adsErrorMessage(status: number, json: any): string {
   return `Google Ads API: ${base}${details.length ? ` | ${details.join("; ")}` : ""}${hint}`;
 }
 
-async function adsFetch(auth: OAuth2Client, path: string, body?: unknown): Promise<unknown> {
+export async function adsFetch(
+  auth: OAuth2Client,
+  path: string,
+  body?: unknown,
+  timeoutMs = ADS_TIMEOUT_MS
+): Promise<unknown> {
   const { token } = await auth.getAccessToken();
-  const res = await fetch(`${BASE}${path}`, {
-    method: body ? "POST" : "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "developer-token": config.ads.developerToken,
-      ...(config.ads.loginCustomerId ? { "login-customer-id": config.ads.loginCustomerId } : {}),
-      "Content-Type": "application/json",
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(adsErrorMessage(res.status, json));
-  return json;
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: body ? "POST" : "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "developer-token": config.ads.developerToken,
+        ...(config.ads.loginCustomerId ? { "login-customer-id": config.ads.loginCustomerId } : {}),
+        "Content-Type": "application/json",
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(adsErrorMessage(res.status, json));
+    return json;
+  } catch (e) {
+    if (signal.aborted) throw new Error(`Google Ads API did not respond within ${timeoutMs / 1000}s`);
+    throw e;
+  }
 }
 
 export function registerAdsTools(server: McpServer, ctx: ToolContext): void {

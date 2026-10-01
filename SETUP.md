@@ -97,7 +97,7 @@ The consent screen shows the client's name and where you will be sent back to. O
 
 **Sending email:** `GMAIL_SEND_ENABLED=true` registers `gmail_send` and adds the `gmail.send` scope for new logins. Users who connected earlier already hold a Gmail scope that allows sending, so the tool appears for them without reconnecting.
 
-**Google Ads:** apply for a developer token in the Ads UI (Tools → API Center, needs an MCC). Once granted (test → basic access), set `ADS_DEVELOPER_TOKEN` (and `ADS_LOGIN_CUSTOMER_ID` for MCC) in `.env`, restart. Tools `ads_list_accounts` and `ads_query` appear for users who granted the `adwords` scope. Set `ADS_API_VERSION` (default `v22`) to a version that is not sunset — see https://developers.google.com/google-ads/api/docs/sunset-dates.
+**Google Ads:** apply for a developer token in the Ads UI (Tools → API Center, needs an MCC). Once granted (test → basic access), set `ADS_DEVELOPER_TOKEN` (and `ADS_LOGIN_CUSTOMER_ID` for MCC) in `.env`, restart. Tools `ads_list_accounts` and `ads_query` appear for users who granted the `adwords` scope. Set `ADS_API_VERSION` (default `v25`, sunsets August 2027) to a version that is not sunset; v22 sunsets in October 2026 — see https://developers.google.com/google-ads/api/docs/sunset-dates.
 
 **Business Profile:** submit the GBP API access request form for your GCP project. Once quota > 0, set `GBP_ENABLED=true`, restart.
 

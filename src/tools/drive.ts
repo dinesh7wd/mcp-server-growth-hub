@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { google } from "googleapis";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ok, truncate, READ_ONLY, CREATES, type ToolContext } from "./helpers.js";
+import { ok, truncate, untrusted, UNTRUSTED_NOTE, READ_ONLY, CREATES, type ToolContext } from "./helpers.js";
 
 const EXPORT_MIME: Record<string, string> = {
   "application/vnd.google-apps.document": "text/plain",
@@ -72,7 +72,7 @@ export function registerDriveTools(server: McpServer, ctx: ToolContext, caps: Dr
       {
         title: "Drive: Read file",
         description:
-          "Read file content as text. Google Docs/Slides are exported as text and Sheets as CSV (first sheet). Other text files under 5 MB are downloaded. Binary files return metadata only.",
+          `Read file content as text. Google Docs/Slides are exported as text and Sheets as CSV (first sheet). Other text files under 5 MB are downloaded. Binary files return metadata only. ${UNTRUSTED_NOTE}`,
         inputSchema: {
           fileId,
           maxChars: z.number().int().min(1000).max(500_000).default(100_000).describe("Maximum characters of content to return"),
@@ -97,7 +97,7 @@ export function registerDriveTools(server: McpServer, ctx: ToolContext, caps: Dr
           }
           if (content === null) return ok({ note: "Binary or large file — metadata only", ...meta });
           const { text, truncated } = truncate(content, maxChars);
-          return ok(`# ${meta.name}\n\n${text}${truncated ? `\n\n[truncated at ${maxChars} characters]` : ""}`);
+          return ok(`# ${meta.name}\n\n${untrusted("drive", text)}${truncated ? `\n\n[truncated at ${maxChars} characters]` : ""}`);
         } catch (e) {
           return ctx.fail(e);
         }

@@ -402,6 +402,14 @@ oauthRouter.post("/token", limits.token, ...formBody, (req, res) => {
     const presented = str(b.refresh_token);
     if (!presented) return err(400, "invalid_request", "refresh_token is required");
     const row = db.getToken(presented);
+    if (!row) {
+      const reused = db.findUsedRefreshToken(presented);
+      if (reused) {
+        db.deleteTokensFor(reused.client_id, reused.user_id);
+        console.warn("Refresh token reuse detected; revoked the grant", { client_id: reused.client_id });
+        return err(400, "invalid_grant", "Refresh token was already used; this connection has been revoked, please reconnect");
+      }
+    }
     if (!row || row.type !== "refresh") return err(400, "invalid_grant", "Unknown or expired refresh token");
     if (row.client_id !== clientId) return err(400, "invalid_grant", "client_id mismatch");
     const identity = db.getUserIdentity(row.user_id);
@@ -409,7 +417,7 @@ oauthRouter.post("/token", limits.token, ...formBody, (req, res) => {
       db.deleteUserTokens(row.user_id);
       return err(400, "invalid_grant", "Account is no longer allowed on this server");
     }
-    if (!db.consumeToken(presented)) return err(400, "invalid_grant", "Refresh token already used");
+    if (!db.consumeRefreshToken(presented, row)) return err(400, "invalid_grant", "Refresh token already used");
     return issueTokens(res, clientId, row.user_id);
   }
 

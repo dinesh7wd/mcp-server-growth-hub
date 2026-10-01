@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { google, type gmail_v1 } from "googleapis";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ok, mapLimit, truncate, READ_ONLY, CREATES, SENDS, type ToolContext } from "./helpers.js";
+import { ok, mapLimit, truncate, untrusted, UNTRUSTED_NOTE, READ_ONLY, CREATES, SENDS, type ToolContext } from "./helpers.js";
 import { addressListSchema, buildRawEmail, htmlToText, subjectSchema } from "./email.js";
 
 function header(msg: gmail_v1.Schema$Message, name: string): string {
@@ -97,7 +97,7 @@ export function registerGmailTools(server: McpServer, ctx: ToolContext, caps: Gm
       "gmail_read_message",
       {
         title: "Gmail: Read message",
-        description: "Read one message by ID as plain text (HTML is converted). Long bodies are truncated to maxChars.",
+        description: `Read one message by ID as plain text (HTML is converted). Long bodies are truncated to maxChars. ${UNTRUSTED_NOTE}`,
         inputSchema: {
           messageId,
           maxChars: z.number().int().min(1000).max(200_000).default(50_000).describe("Maximum body characters to return"),
@@ -118,7 +118,7 @@ export function registerGmailTools(server: McpServer, ctx: ToolContext, caps: Gm
             date: header(msg, "Date"),
             labelIds: msg.labelIds ?? [],
             attachments: attachments(msg.payload),
-            body: text,
+            body: untrusted("gmail", text),
             truncated,
           });
         } catch (e) {

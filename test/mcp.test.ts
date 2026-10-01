@@ -1,12 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import { createCipheriv, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { createApp } from "../src/app.js";
 import * as db from "../src/db.js";
 import { config } from "../src/config.js";
 import { rpcBody } from "./util.js";
 
+const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 const app = createApp();
 const HOST = "mcp.test";
 const ACCEPT = "application/json, text/event-stream";
@@ -101,7 +103,7 @@ describe("POST /mcp authentication", () => {
     const token = seedUser("case-user", LEGACY_SCOPE);
     const res = await mcp().set("Authorization", `bearer ${token}`).send(initialize);
     expect(res.status).toBe(200);
-    expect(rpcBody(res).result.serverInfo.name).toBe("growth-hub");
+    expect(rpcBody(res).result.serverInfo).toEqual({ name: "growth-hub", version: pkg.version });
   });
 });
 

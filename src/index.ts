@@ -5,6 +5,9 @@ import { closeDb } from "./db.js";
 const server = createApp().listen(config.port, () => {
   console.log(`Growth Hub MCP server listening on :${config.port}`);
   console.log(`Public URL: ${config.resourceUrl}`);
+  if (config.allowedDomains.length === 0) {
+    console.warn("ALLOWED_DOMAINS is empty: any Google account can connect. Set it to restrict access.");
+  }
 });
 
 server.on("error", (e) => {

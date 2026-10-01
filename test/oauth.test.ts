@@ -222,18 +222,44 @@ describe("token endpoint", () => {
     expect(res.body.error).toBe("invalid_grant");
   });
 
-  it("rotates refresh tokens and rejects reuse", async () => {
+  it("rotates refresh tokens", async () => {
     const { clientId, refresh_token } = await fullLogin();
     const r1 = await request(app).post("/token").type("form").send({ grant_type: "refresh_token", refresh_token, client_id: clientId });
     expect(r1.status).toBe(200);
     expect(r1.headers["cache-control"]).toBe("no-store");
     expect(r1.body.refresh_token).toBeTruthy();
     expect(r1.body.refresh_token).not.toBe(refresh_token);
-    const reuse = await request(app).post("/token").type("form").send({ grant_type: "refresh_token", refresh_token, client_id: clientId });
-    expect(reuse.status).toBe(400);
-    expect(reuse.body.error).toBe("invalid_grant");
     const r2 = await request(app).post("/token").type("form").send({ grant_type: "refresh_token", refresh_token: r1.body.refresh_token, client_id: clientId });
     expect(r2.status).toBe(200);
+  });
+
+  it("revokes the whole grant when a rotated refresh token is replayed", async () => {
+    const { clientId, refresh_token } = await fullLogin({ id: "reuse-user", email: "reuse@example.com" });
+    const r1 = await request(app).post("/token").type("form").send({ grant_type: "refresh_token", refresh_token, client_id: clientId });
+    expect(r1.status).toBe(200);
+
+    const replay = await request(app).post("/token").type("form").send({ grant_type: "refresh_token", refresh_token, client_id: clientId });
+    expect(replay.status).toBe(400);
+    expect(replay.body.error).toBe("invalid_grant");
+    expect(replay.body.error_description).toMatch(/revoked/);
+
+    expect(db.getToken(r1.body.refresh_token)).toBeNull();
+    expect(db.getToken(r1.body.access_token)).toBeNull();
+    const after = await request(app).post("/token").type("form").send({ grant_type: "refresh_token", refresh_token: r1.body.refresh_token, client_id: clientId });
+    expect(after.status).toBe(400);
+
+    const again = await request(app).post("/token").type("form").send({ grant_type: "refresh_token", refresh_token, client_id: clientId });
+    expect(again.body.error_description).toMatch(/revoked/);
+  });
+
+  it("forgets rotated refresh tokens once they would have expired", async () => {
+    const { clientId, refresh_token } = await fullLogin({ id: "expired-reuse", email: "er@example.com" });
+    await request(app).post("/token").type("form").send({ grant_type: "refresh_token", refresh_token, client_id: clientId });
+    expect(db.findUsedRefreshToken(refresh_token)).not.toBeNull();
+    db.rawDb().prepare("UPDATE used_refresh_tokens SET expires_at = ? WHERE token = ?").run(Date.now() - 1, db.hashToken(refresh_token));
+    expect(db.findUsedRefreshToken(refresh_token)).toBeNull();
+    db.cleanup();
+    expect(db.rawDb().prepare("SELECT COUNT(*) AS n FROM used_refresh_tokens WHERE token = ?").get(db.hashToken(refresh_token))).toEqual({ n: 0 });
   });
 
   it("requires client_id on refresh (body or Basic) and checks it", async () => {

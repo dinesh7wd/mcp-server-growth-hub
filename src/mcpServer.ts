@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { authFor } from "./googleClient.js";
 import { capabilities } from "./scopes.js";
@@ -11,6 +12,8 @@ import { registerGmailTools } from "./tools/gmail.js";
 import { registerAdsTools } from "./tools/ads.js";
 import { registerGbpTools } from "./tools/gbp.js";
 
+export const VERSION: string = createRequire(import.meta.url)("../package.json").version;
+
 /**
  * Build an MCP server bound to one authenticated user's Google credentials.
  * Tool families are registered only when enabled by config AND granted by the user.
@@ -21,7 +24,7 @@ export async function buildMcpServer(userId: string): Promise<McpServer> {
   const caps = capabilities(grantedScopes);
   const ctx: ToolContext = { auth, fail: makeFail(() => db.deleteUserTokens(userId)) };
 
-  const server = new McpServer({ name: "growth-hub", version: "1.2.0" });
+  const server = new McpServer({ name: "growth-hub", version: VERSION });
 
   if (caps.gsc) registerGscTools(server, ctx, { submit: caps.gscSubmit });
   if (caps.indexing) registerIndexingTools(server, ctx);

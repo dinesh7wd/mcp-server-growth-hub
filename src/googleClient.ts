@@ -5,6 +5,10 @@ import { parseScopes } from "./scopes.js";
 
 export type OAuth2Client = Auth.OAuth2Client;
 
+/** googleapis has no request timeout by default; a stalled Google call would hang the tool call. */
+export const GOOGLE_API_TIMEOUT_MS = 60_000;
+google.options({ timeout: GOOGLE_API_TIMEOUT_MS });
+
 /** The user must re-run the OAuth flow; surfaced to MCP clients as HTTP 401 invalid_token. */
 export class ReauthRequiredError extends Error {}
 

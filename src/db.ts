@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 `;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** Idempotent, versioned migrations (PRAGMA user_version). Safe on both fresh and legacy databases. */
 export function migrate(database: DB, refreshTtlMs: number = config.refreshTokenTtlMs): void {
@@ -100,6 +100,21 @@ export function migrate(database: DB, refreshTtlMs: number = config.refreshToken
         .prepare("UPDATE clients SET last_used_at = ? WHERE client_id IN (SELECT DISTINCT client_id FROM tokens)")
         .run(t);
       database.pragma("user_version = 2");
+    })();
+    version = 2;
+  }
+
+  if (version < 3) {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS used_refresh_tokens (
+          token TEXT PRIMARY KEY,
+          client_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+      database.pragma("user_version = 3");
     })();
   }
 }
@@ -334,6 +349,29 @@ export function consumeToken(token: string): boolean {
   return db.prepare("DELETE FROM tokens WHERE token = ?").run(hashToken(token)).changes === 1;
 }
 
+/**
+ * Single-use rotation: deletes the refresh token and remembers its hash until it would have
+ * expired, so a replay of the old token can be told apart from an unknown one.
+ */
+export function consumeRefreshToken(token: string, row: TokenRow): boolean {
+  const hashed = hashToken(token);
+  return db.transaction(() => {
+    if (db.prepare("DELETE FROM tokens WHERE token = ? AND type = 'refresh'").run(hashed).changes !== 1) return false;
+    db.prepare(
+      "INSERT OR REPLACE INTO used_refresh_tokens (token, client_id, user_id, expires_at) VALUES (?, ?, ?, ?)"
+    ).run(hashed, row.client_id, row.user_id, row.expires_at ?? now() + config.refreshTokenTtlMs);
+    return true;
+  })();
+}
+
+/** The grant (client + user) of an already-rotated refresh token, or null. */
+export function findUsedRefreshToken(token: string): { client_id: string; user_id: string } | null {
+  const row = db
+    .prepare("SELECT client_id, user_id FROM used_refresh_tokens WHERE token = ? AND expires_at >= ?")
+    .get(hashToken(token), now()) as { client_id: string; user_id: string } | undefined;
+  return row ?? null;
+}
+
 export function deleteTokensFor(clientId: string, userId: string): void {
   db.prepare("DELETE FROM tokens WHERE client_id = ? AND user_id = ?").run(clientId, userId);
 }
@@ -346,6 +384,7 @@ export function deleteUserTokens(userId: string): void {
 export function cleanup(): void {
   const t = now();
   db.prepare("DELETE FROM tokens WHERE expires_at IS NOT NULL AND expires_at < ?").run(t);
+  db.prepare("DELETE FROM used_refresh_tokens WHERE expires_at < ?").run(t);
   db.prepare("DELETE FROM auth_requests WHERE created_at < ?").run(t - AUTH_REQUEST_TTL_MS);
   db.prepare("DELETE FROM auth_codes WHERE created_at < ?").run(t - AUTH_CODE_TTL_MS);
   db.prepare(
