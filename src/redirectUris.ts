@@ -24,7 +24,7 @@ export function hostAllowed(hostname: string, allowedHosts: string[]): boolean {
  * Accepts https:// URIs whose host is allow-listed, http:// loopback (localhost / 127.0.0.1 / [::1]) and
  * allow-listed private-use schemes (RFC 8252 §7.1), e.g. cursor://anysphere.cursor-mcp/oauth/callback.
  */
-export function checkRedirectUri(uri: unknown, allowedSchemes: string[], allowedHttpsHosts: string[] = ["*"]): RedirectCheck {
+export function checkRedirectUri(uri: unknown, allowedSchemes: string[], allowedHttpsHosts: string[]): RedirectCheck {
   if (typeof uri !== "string" || uri.length === 0) return { ok: false, reason: "must be a non-empty string" };
   if (uri.length > MAX_REDIRECT_URI_LENGTH) return { ok: false, reason: "too long" };
   let u: URL;

@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { checkRedirectUri, cspSourceFor, describeRedirect } from "../src/redirectUris.js";
 
 const schemes = ["cursor", "vscode", "vscode-insiders", "claude"];
-const ok = (u: unknown) => checkRedirectUri(u, schemes).ok;
+const hosts = ["claude.ai", "a.test"];
+const ok = (u: unknown) => checkRedirectUri(u, schemes, hosts).ok;
 
 describe("redirect URI validation", () => {
   it("accepts https and loopback http (IPv4, IPv6, localhost)", () => {
@@ -32,7 +33,13 @@ describe("redirect URI validation", () => {
   });
 
   it("does not allow javascript/data even if configured", () => {
-    expect(checkRedirectUri("javascript:alert(1)", ["javascript"]).ok).toBe(false);
+    expect(checkRedirectUri("javascript:alert(1)", ["javascript"], ["*"]).ok).toBe(false);
+  });
+
+  it("allows https only for listed hosts; an empty list allows none", () => {
+    expect(ok("https://evil.example/cb")).toBe(false);
+    expect(checkRedirectUri("https://claude.ai/cb", schemes, []).ok).toBe(false);
+    expect(checkRedirectUri("https://app.claude.ai/cb", schemes, ["*.claude.ai"]).ok).toBe(true);
   });
 
   it("describes destinations and CSP sources", () => {
